@@ -52,33 +52,41 @@ const texturesReady = Promise.all(imagePaths.map(loadTexture)).then((txs) => {
 })
 
 function makeTextureForFace(srcTex, faceW, faceH) {
-  // clone the texture so repeat/offset changes don't affect other meshes
-  const t = srcTex.clone()
-  t.wrapS = t.wrapT = THREE.ClampToEdgeWrapping
-  t.center.set(0.5, 0.5)
+  // Create a canvas texture that draws the image scaled to 'contain'
+  // so the full image is always visible (letterboxed) on the face.
+  const canvas = document.createElement('canvas')
+  // pick a reasonable resolution where the longer side is 1024
+  const faceAspect = faceW / faceH || 1
+  let cw, ch
+  if (faceAspect >= 1) { cw = 1024; ch = Math.max(64, Math.round(1024 / faceAspect)) }
+  else { ch = 1024; cw = Math.max(64, Math.round(1024 * faceAspect)) }
+  canvas.width = cw
+  canvas.height = ch
+  const ctx = canvas.getContext('2d')
 
-  function adjust() {
-    const img = t.image
+  const tex = new THREE.CanvasTexture(canvas)
+  tex.encoding = THREE.sRGBEncoding
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping
+
+  function drawImageToCanvas(img) {
     if (!img || !img.width || !img.height) return
-    const imgAspect = img.width / img.height
-    const faceAspect = faceW / faceH
-    if (imgAspect > faceAspect) {
-      // image is wider than face: fit width
-      const scale = faceAspect / imgAspect
-      t.repeat.set(scale, 1)
-    } else {
-      // image is taller than face: fit height
-      const scale = imgAspect / faceAspect
-      t.repeat.set(1, scale)
-    }
-    t.offset.set((1 - t.repeat.x) / 2, (1 - t.repeat.y) / 2)
-    t.needsUpdate = true
+    // clear
+    ctx.clearRect(0, 0, cw, ch)
+    // fill with transparent or black background if desired; keep transparent
+    // compute scale to fit (contain)
+    const scale = Math.min(cw / img.width, ch / img.height)
+    const iw = Math.round(img.width * scale)
+    const ih = Math.round(img.height * scale)
+    const ix = Math.round((cw - iw) / 2)
+    const iy = Math.round((ch - ih) / 2)
+    ctx.drawImage(img, ix, iy, iw, ih)
+    tex.needsUpdate = true
   }
 
-  // if image already loaded, adjust immediately, otherwise wait
-  if (t.image && t.image.complete) adjust()
-  else if (t.image) t.image.addEventListener('load', adjust)
-  return t
+  const img = srcTex.image
+  if (img && img.complete && img.naturalWidth) drawImageToCanvas(img)
+  else if (img) img.addEventListener('load', () => drawImageToCanvas(img))
+  return tex
 }
 
 // create video element and texture (muted so browsers allow autoplay when clicked)
@@ -121,139 +129,82 @@ const playerRadius = 0.45
 
 const palette = [0x8fbf8f, 0xa0c4ff, 0xffc89a, 0xffe082, 0xb39ddb, 0x90a4ae]
 
-function makeBuilding(x, z) {
-  const isWide = Math.random() < 0.18
-  const w = isWide ? (2 + Math.random() * 3) : (1 + Math.random() * 1.6)
-  const d = isWide ? (2 + Math.random() * 3) : (1 + Math.random() * 1.6)
-  const h = 2 + Math.random() * 24
-  const geom = new THREE.BoxGeometry(w, h, d)
-  const color = palette[Math.floor(Math.random() * palette.length)]
+function makeBuilding(i, j, x, z, roadEvery, spacing) {
+  // simple single-cube building aligned to nearest road edge
+  const isWide = Math.random() < 0.25
+  // make cubes thicker so they read as volumetric shapes
+  const w = isWide ? (2 + Math.random() * 2) : (1.4 + Math.random() * 1.6)
+  const d = isWide ? (2 + Math.random() * 2) : (1.4 + Math.random() * 1.6)
+  const h = 3 + Math.random() * 6
 
-  // Create per-face materials. Box faces order: +X, -X, +Y, -Y, +Z, -Z
-  const materials = []
-  for (let i = 0; i < 6; i++) {
-    // default building faces are wireframe
-    materials.push(new THREE.MeshStandardMaterial({ color, metalness: 0.1, roughness: 0.7, wireframe: true }))
+  // determine adjacency to road lines (cells next to road are i%roadEvery===1 or ===roadEvery-1)
+  const localI = i % roadEvery
+  const localJ = j % roadEvery
+
+  let shiftX = 0
+  let shiftZ = 0
+  if (localI === 1) shiftX = - (spacing / 2 - w / 2)
+  else if (localI === roadEvery - 1) shiftX = (spacing / 2 - w / 2)
+  if (localJ === 1) shiftZ = - (spacing / 2 - d / 2)
+  else if (localJ === roadEvery - 1) shiftZ = (spacing / 2 - d / 2)
+
+  // if adjacent on both axes, pick the dominant one randomly to keep it simple
+  if (shiftX !== 0 && shiftZ !== 0) {
+    if (Math.random() < 0.5) shiftZ = 0
+    else shiftX = 0
   }
 
-  // keep building faces wireframe; we'll add overlay planes (images/videos)
+  const bx = x + shiftX
+  const bz = z + shiftZ
 
-  const mesh = new THREE.Mesh(geom, materials)
-  mesh.position.set(x, h / 2, z)
-  mesh.userData.wide = isWide
+  const geom = new THREE.BoxGeometry(w, h, d)
 
-  // helper to add overlay plane to a side keeping aspect ratio and inset
-  function addOverlay(isVideo, srcTexture, faceIndex) {
-    // create a square overlay container whose size is comparable to the face
-    // and an inner image/video plane that preserves the source aspect ratio
-    // clone textures for safety
-    let mapTex = srcTexture
-    if (!isVideo && srcTexture && srcTexture.clone) {
-      mapTex = srcTexture.clone()
-      mapTex.wrapS = mapTex.wrapT = THREE.ClampToEdgeWrapping
-      if (mapTex.repeat) mapTex.repeat.set(1, 1)
-      if (mapTex.offset) mapTex.offset.set(0, 0)
-    } else if (isVideo && srcTexture) {
-      mapTex = srcTexture
-      mapTex.wrapS = mapTex.wrapT = THREE.ClampToEdgeWrapping
-    }
+  // assign a distinct base color per cube (debugging)
+  const baseColor = palette[Math.floor(Math.random() * palette.length)]
+  const materials = []
+  for (let m = 0; m < 6; m++) materials.push(new THREE.MeshStandardMaterial({ color: baseColor, metalness: 0.06, roughness: 0.9 }))
 
-    const material = new THREE.MeshBasicMaterial({ map: mapTex, toneMapped: false, transparent: true, depthTest: true, depthWrite: false, side: THREE.DoubleSide })
+  // determine outward face to place image/video
+  let faceIndex = 0
+  if (shiftX > 0) faceIndex = 0
+  else if (shiftX < 0) faceIndex = 1
+  else if (shiftZ > 0) faceIndex = 4
+  else if (shiftZ < 0) faceIndex = 5
+  else {
+    // if not adjacent to road, pick a random side
+    const dirs = [0, 1, 4, 5]
+    faceIndex = dirs[Math.floor(Math.random() * dirs.length)]
+  }
 
-    // overlay scales (images/videos same scale) and face dims
-    const overlayScale = 1.6
+  // choose texture (favor images) and apply to face
+    if (Math.random() < 0.12) {
+    const vt = new THREE.VideoTexture(videoEl)
+    vt.encoding = THREE.sRGBEncoding
+    vt.minFilter = THREE.LinearFilter
+    vt.magFilter = THREE.LinearFilter
+    vt.format = THREE.RGBAFormat
+    materials[faceIndex] = new THREE.MeshBasicMaterial({ map: vt, toneMapped: false, transparent: false, depthTest: true, depthWrite: true, side: THREE.FrontSide })
+  } else {
+    const src = imageTextures[Math.floor(Math.random() * imageTextures.length)]
     const faceW = (faceIndex === 0 || faceIndex === 1) ? d : w
     const faceH = h
-
-    // make the outer plane square and at most the smaller of faceW/faceH * scale
-    const squareSide = Math.min(faceW, faceH) * overlayScale
-
-    // inner plane size will be computed to preserve aspect and fit inside the square
-    const inner = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material)
-    const containerGroup = new THREE.Group()
-    containerGroup.add(inner)
-
-    function adjustInner(aspect) {
-      if (!isFinite(aspect) || aspect <= 0) aspect = 1
-      let innerW, innerH
-      if (aspect >= 1) {
-        innerW = squareSide
-        innerH = squareSide / aspect
-      } else {
-        innerH = squareSide
-        innerW = squareSide * aspect
-      }
-      if (inner.geometry) inner.geometry.dispose()
-      inner.geometry = new THREE.PlaneGeometry(innerW, innerH)
-      inner.position.set(0, 0, 0)
-    }
-
-    // wait for source size then adjust
-    if (isVideo) {
-      function applyVideoSize() {
-        const vw = videoEl.videoWidth || 1
-        const vh = videoEl.videoHeight || 1
-        adjustInner(vw / vh)
-      }
-      if (videoEl.readyState >= 1) applyVideoSize()
-      else videoEl.addEventListener('loadedmetadata', applyVideoSize)
-    } else {
-      const img = srcTexture.image
-      if (img && img.complete && img.naturalWidth) {
-        adjustInner(img.naturalWidth / img.naturalHeight)
-      } else if (img) {
-        img.addEventListener('load', () => adjustInner(img.naturalWidth / img.naturalHeight))
-      }
-    }
-
-    // position the containerGroup slightly in front of the face
-    const eps = 0.01
-    if (faceIndex === 0) {
-      containerGroup.position.set(w / 2 + eps, 0, 0)
-      containerGroup.rotation.y = -Math.PI / 2
-    } else if (faceIndex === 1) {
-      containerGroup.position.set(-w / 2 - eps, 0, 0)
-      containerGroup.rotation.y = Math.PI / 2
-    } else if (faceIndex === 4) {
-      containerGroup.position.set(0, 0, d / 2 + eps)
-      containerGroup.rotation.y = 0
-    } else if (faceIndex === 5) {
-      containerGroup.position.set(0, 0, -d / 2 - eps)
-      containerGroup.rotation.y = Math.PI
-    }
-
-    containerGroup.renderOrder = 2
-    mesh.add(containerGroup)
+    const tex = makeTextureForFace(src, faceW, faceH)
+    materials[faceIndex] = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, transparent: false, depthTest: true, depthWrite: true, side: THREE.FrontSide })
   }
 
-  // Sporadically add a small number of overlay planes to side faces
-  const sideFaces = [0, 1, 4, 5]
-  if (Math.random() < 0.35) {
-    const count = 1 + Math.floor(Math.random() * 3)
-    for (let k = 0; k < count; k++) {
-      const face = sideFaces[Math.floor(Math.random() * sideFaces.length)]
-      if (Math.random() < 0.12) {
-        const vt = new THREE.VideoTexture(videoEl)
-        vt.encoding = THREE.sRGBEncoding
-        vt.minFilter = THREE.LinearFilter
-        vt.magFilter = THREE.LinearFilter
-        vt.format = THREE.RGBAFormat
-        addOverlay(true, vt, face)
-      } else {
-        const src = imageTextures[Math.floor(Math.random() * imageTextures.length)]
-        addOverlay(false, src, face)
-      }
-    }
-  }
-
+  const mesh = new THREE.Mesh(geom, materials)
+  mesh.position.set(bx, h / 2, bz)
+  mesh.castShadow = false
+  mesh.receiveShadow = false
   return mesh
 }
 
 // Defer city generation until textures are loaded to ensure overlays
 // have valid image data when created.
 texturesReady.then(() => {
-  const grid = 18
-  const spacing = 4
+  // make the city smaller by reducing grid and spacing
+  const grid = 12
+  const spacing = 5
   // Roads every N grid lines
   const roadEvery = 4
   const roadWidth = spacing * 0.9
@@ -264,13 +215,16 @@ texturesReady.then(() => {
       const isRoadZ = (j % roadEvery === 0)
       if (isRoadX || isRoadZ) continue // leave space for roads
 
+      // base grid position with small jitter
       const x = (i - grid / 2) * spacing + (Math.random() - 0.5) * 0.6
       const z = (j - grid / 2) * spacing + (Math.random() - 0.5) * 0.6
-      const b = makeBuilding(x, z)
+
+      // create a single cube building aligned to the nearest road edge
+      const b = makeBuilding(i, j, x, z, roadEvery, spacing)
       city.add(b)
       // compute and store bounding box expanded slightly for collision
       const box = new THREE.Box3().setFromObject(b)
-      box.expandByScalar(0.25)
+      box.expandByScalar(0.15)
       buildingBoxes.push(box)
     }
   }
