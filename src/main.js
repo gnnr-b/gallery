@@ -1,6 +1,7 @@
 import './style.css'
 import * as THREE from 'three'
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 
 const app = document.querySelector('#app')
 app.innerHTML = `
@@ -233,24 +234,91 @@ texturesReady.then(() => {
   const roadEvery = 4
   const roadWidth = spacing * 0.9
 
-  for (let i = 0; i < grid; i++) {
-    for (let j = 0; j < grid; j++) {
-      const isRoadX = (i % roadEvery === 0)
-      const isRoadZ = (j % roadEvery === 0)
-      if (isRoadX || isRoadZ) continue // leave space for roads
+  // --- Gallery layout ---
+  // Load .glb models and place them in randomized, non-overlapping spots
+  const gltfLoader = new GLTFLoader()
+  const modelFiles = [
+    new URL('./assets/ganesha.glb', import.meta.url).href,
+    new URL('./assets/broken_head.glb', import.meta.url).href
+  ]
 
-      // base grid position with small jitter
-      const x = (i - grid / 2) * spacing + (Math.random() - 0.5) * 0.6
-      const z = (j - grid / 2) * spacing + (Math.random() - 0.5) * 0.6
+  function randomPos(radius = 14) {
+    const a = Math.random() * Math.PI * 2
+    const r = Math.sqrt(Math.random()) * radius
+    return [Math.cos(a) * r, Math.sin(a) * r]
+  }
 
-      // create a single cube building aligned to the nearest road edge
-      const b = makeBuilding(i, j, x, z, roadEvery, spacing)
-      city.add(b)
-      // compute and store bounding box expanded slightly for collision
-      const box = new THREE.Box3().setFromObject(b)
-      box.expandByScalar(0.15)
-      buildingBoxes.push(box)
+  function placeObjectNoOverlap(createMeshFn) {
+    for (let tries = 0; tries < 50; tries++) {
+      const [rx, rz] = randomPos(14)
+      const mesh = createMeshFn(rx, rz)
+      const box = new THREE.Box3().setFromObject(mesh)
+      box.expandByScalar(0.6)
+      // check overlap
+      const overlap = buildingBoxes.some(b => b.intersectsBox(box))
+      if (!overlap) { city.add(mesh); buildingBoxes.push(box); return mesh }
     }
+    return null
+  }
+
+  // place models larger and in their own spaces
+  modelFiles.forEach((p) => {
+    gltfLoader.load(p, (g) => {
+      const root = g.scene || g.scenes[0]
+      root.traverse(n => { if (n.isMesh) { n.castShadow = true; n.receiveShadow = true } })
+      // create mesh wrapper function for placement
+      const createFn = (rx, rz) => {
+        const clone = root.clone()
+        const scale = 2.5 + Math.random() * 2.0 // much bigger
+        clone.scale.setScalar(scale)
+        // place at rx,0,rz first then compute bbox to lift above ground
+        clone.position.set(rx, 0, rz)
+        const bbox = new THREE.Box3().setFromObject(clone)
+        const minY = bbox.min.y
+        const lift = (minY < 0) ? -minY + 0.05 : 0.05
+        clone.position.y = lift
+        return clone
+      }
+      const placed = placeObjectNoOverlap(createFn)
+      if (!placed) {
+        // fallback: add at fixed spot, elevated to sit on ground
+        root.scale.setScalar(3.0)
+        root.position.set(0, 0, -6)
+        const bbox = new THREE.Box3().setFromObject(root)
+        const minY = bbox.min.y
+        const lift = (minY < 0) ? -minY + 0.05 : 0.05
+        root.position.y = lift
+        scene.add(root)
+      }
+    }, undefined, (err) => console.warn('model load failed', p, err))
+  })
+
+  // scatter uniform cubes (panels) randomly like gallery pedestals/walls
+  const totalPanels = 14
+  const panelSize = 3.5
+
+  for (let i = 0; i < totalPanels; i++) {
+    const createPanel = (rx, rz) => {
+      const geom = new THREE.BoxGeometry(panelSize, panelSize, panelSize)
+      const baseMat = new THREE.MeshStandardMaterial({ color: 0x0f0f0f, metalness: 0.9, roughness: 0.12 })
+      const materials = []
+      for (let fi = 0; fi < 6; fi++) materials.push(baseMat)
+      if (imageTextures.length) {
+        const src = imageTextures[Math.floor(Math.random() * imageTextures.length)]
+        const faceW = panelSize
+        const faceH = panelSize
+        const tex = makeTextureForFace(src, faceW, faceH)
+        // put image on a random side
+        const sideIdx = [0,1,4,5][Math.floor(Math.random()*4)]
+        materials[sideIdx] = new THREE.MeshStandardMaterial({ map: tex, metalness: 0.0, roughness: 0.35, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.6 })
+      }
+      const mesh = new THREE.Mesh(geom, materials)
+      mesh.position.set(rx, panelSize/2, rz)
+      mesh.castShadow = false
+      mesh.receiveShadow = false
+      return mesh
+    }
+    placeObjectNoOverlap(createPanel)
   }
 
   // Create road meshes (long strips) where grid lines land
