@@ -1,5 +1,6 @@
 import './style.css'
 import * as THREE from 'three'
+import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js'
 
 const app = document.querySelector('#app')
 app.innerHTML = `
@@ -19,7 +20,25 @@ const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setPixelRatio(window.devicePixelRatio)
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.outputEncoding = THREE.sRGBEncoding
+// enable physically correct light calculations and nicer tonemapping
+renderer.physicallyCorrectLights = true
+renderer.toneMapping = THREE.ACESFilmicToneMapping
+renderer.toneMappingExposure = 1.0
 container.appendChild(renderer.domElement)
+
+// load HDR environment and apply as scene.environment (for metallic reflections)
+const pmremGenerator = new THREE.PMREMGenerator(renderer)
+pmremGenerator.compileEquirectangularShader()
+const hdrPath = new URL('./assets/background.hdr', import.meta.url).href
+new HDRLoader()
+  .load(hdrPath, (hdrTex) => {
+    // HDRLoader provides an equirectangular texture
+    const envMap = pmremGenerator.fromEquirectangular(hdrTex).texture
+    scene.environment = envMap
+    scene.background = envMap
+    if (hdrTex.dispose) hdrTex.dispose()
+    pmremGenerator.dispose()
+  }, undefined, (err) => console.warn('HDR load failed', err))
 
 // Load image textures and video texture
 const texLoader = new THREE.TextureLoader()
@@ -107,10 +126,22 @@ videoTexture.format = THREE.RGBAFormat
 // Lights
 const hemi = new THREE.HemisphereLight(0xffffbb, 0x080820, 0.8)
 scene.add(hemi)
-const dir = new THREE.DirectionalLight(0xffffff, 0.8)
+// small ambient to lift shadowed areas
+const ambient = new THREE.AmbientLight(0x404040, 0.6)
+scene.add(ambient)
+// stronger directional light for clear specular highlights
+const dir = new THREE.DirectionalLight(0xffffff, 1.6)
 dir.position.set(5, 10, 7.5)
 dir.castShadow = true
 scene.add(dir)
+// add a warm key point light to create shiny highlights on cube faces
+const keyLight = new THREE.PointLight(0xfff7e6, 1.2, 40)
+keyLight.position.set(0, 8, 8)
+scene.add(keyLight)
+// a cool fill light behind the camera to lift shadows subtly
+const fill = new THREE.PointLight(0x88aaff, 0.35, 60)
+fill.position.set(0, 4, -8)
+scene.add(fill)
 
 // Ground (wireframe)
 const groundMat = new THREE.MeshStandardMaterial({ color: 0x223322, wireframe: true })
@@ -131,11 +162,11 @@ const palette = [0x8fbf8f, 0xa0c4ff, 0xffc89a, 0xffe082, 0xb39ddb, 0x90a4ae]
 
 function makeBuilding(i, j, x, z, roadEvery, spacing) {
   // simple single-cube building aligned to nearest road edge
-  const isWide = Math.random() < 0.25
-  // make cubes thicker so they read as volumetric shapes
-  const w = isWide ? (2 + Math.random() * 2) : (1.4 + Math.random() * 1.6)
-  const d = isWide ? (2 + Math.random() * 2) : (1.4 + Math.random() * 1.6)
-  const h = 3 + Math.random() * 6
+  // use a uniform cube size for all buildings
+  const size = 3.5
+  const w = size
+  const d = size
+  const h = size
 
   // determine adjacency to road lines (cells next to road are i%roadEvery===1 or ===roadEvery-1)
   const localI = i % roadEvery
@@ -159,37 +190,30 @@ function makeBuilding(i, j, x, z, roadEvery, spacing) {
 
   const geom = new THREE.BoxGeometry(w, h, d)
 
-  // assign a distinct base color per cube (debugging)
-  const baseColor = palette[Math.floor(Math.random() * palette.length)]
+  // Create simple cube materials: images on four sides (+X, -X, +Z, -Z), dark top/bottom
   const materials = []
-  for (let m = 0; m < 6; m++) materials.push(new THREE.MeshStandardMaterial({ color: baseColor, metalness: 0.06, roughness: 0.9 }))
+  for (let fi = 0; fi < 6; fi++) {
+    // face indices: 0:+X, 1:-X, 2:+Y(top), 3:-Y(bottom), 4:+Z, 5:-Z
+    if (fi === 2 || fi === 3) {
+      materials.push(new THREE.MeshBasicMaterial({ color: 0x0f0f0f }))
+      continue
+    }
 
-  // determine outward face to place image/video
-  let faceIndex = 0
-  if (shiftX > 0) faceIndex = 0
-  else if (shiftX < 0) faceIndex = 1
-  else if (shiftZ > 0) faceIndex = 4
-  else if (shiftZ < 0) faceIndex = 5
-  else {
-    // if not adjacent to road, pick a random side
-    const dirs = [0, 1, 4, 5]
-    faceIndex = dirs[Math.floor(Math.random() * dirs.length)]
-  }
-
-  // choose texture (favor images) and apply to face
+    // choose an image (favor images) for each side face
     if (Math.random() < 0.12) {
-    const vt = new THREE.VideoTexture(videoEl)
-    vt.encoding = THREE.sRGBEncoding
-    vt.minFilter = THREE.LinearFilter
-    vt.magFilter = THREE.LinearFilter
-    vt.format = THREE.RGBAFormat
-    materials[faceIndex] = new THREE.MeshBasicMaterial({ map: vt, toneMapped: false, transparent: false, depthTest: true, depthWrite: true, side: THREE.FrontSide })
-  } else {
-    const src = imageTextures[Math.floor(Math.random() * imageTextures.length)]
-    const faceW = (faceIndex === 0 || faceIndex === 1) ? d : w
-    const faceH = h
-    const tex = makeTextureForFace(src, faceW, faceH)
-    materials[faceIndex] = new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, transparent: false, depthTest: true, depthWrite: true, side: THREE.FrontSide })
+      const vt = new THREE.VideoTexture(videoEl)
+      vt.encoding = THREE.sRGBEncoding
+      vt.minFilter = THREE.LinearFilter
+      vt.magFilter = THREE.LinearFilter
+      vt.format = THREE.RGBAFormat
+      materials.push(new THREE.MeshBasicMaterial({ map: vt, toneMapped: false, side: THREE.FrontSide }))
+    } else {
+      const src = imageTextures[Math.floor(Math.random() * imageTextures.length)]
+      const faceW = (fi === 0 || fi === 1) ? d : w
+      const faceH = h
+      const tex = makeTextureForFace(src, faceW, faceH)
+      materials.push(new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, side: THREE.FrontSide }))
+    }
   }
 
   const mesh = new THREE.Mesh(geom, materials)
