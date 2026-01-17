@@ -12,7 +12,8 @@ app.innerHTML = `
 const container = document.getElementById('scene-container')
 
 const scene = new THREE.Scene()
-scene.fog = new THREE.FogExp2(0x888888, 0.0025)
+// darker ambient fog to push mid/long-range values toward black
+scene.fog = new THREE.FogExp2(0x000000, 0.006)
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000)
 camera.position.set(0, 1.8, 6)
@@ -24,7 +25,8 @@ renderer.outputEncoding = THREE.sRGBEncoding
 // enable physically correct light calculations and nicer tonemapping
 renderer.physicallyCorrectLights = true
 renderer.toneMapping = THREE.ACESFilmicToneMapping
-renderer.toneMappingExposure = 1.0
+// lower exposure for a darker overall look
+renderer.toneMappingExposure = 0.35
 container.appendChild(renderer.domElement)
 
 // load HDR environment and apply as scene.environment (for metallic reflections)
@@ -124,28 +126,28 @@ videoTexture.minFilter = THREE.LinearFilter
 videoTexture.magFilter = THREE.LinearFilter
 videoTexture.format = THREE.RGBAFormat
 
-// Lights
-const hemi = new THREE.HemisphereLight(0xffffbb, 0x080820, 0.8)
+// Lights (further reduced intensities for an even darker scene)
+const hemi = new THREE.HemisphereLight(0xffffbb, 0x080820, 0.18)
 scene.add(hemi)
 // small ambient to lift shadowed areas
-const ambient = new THREE.AmbientLight(0x404040, 0.6)
+const ambient = new THREE.AmbientLight(0x101010, 0.08)
 scene.add(ambient)
-// stronger directional light for clear specular highlights
-const dir = new THREE.DirectionalLight(0xffffff, 1.6)
+// directional light for specular highlights (toned down)
+const dir = new THREE.DirectionalLight(0xffffff, 0.4)
 dir.position.set(5, 10, 7.5)
 dir.castShadow = true
 scene.add(dir)
 // add a warm key point light to create shiny highlights on cube faces
-const keyLight = new THREE.PointLight(0xfff7e6, 1.2, 40)
+const keyLight = new THREE.PointLight(0xfff7e6, 0.2, 40)
 keyLight.position.set(0, 8, 8)
 scene.add(keyLight)
 // a cool fill light behind the camera to lift shadows subtly
-const fill = new THREE.PointLight(0x88aaff, 0.35, 60)
+const fill = new THREE.PointLight(0x88aaff, 0.04, 60)
 fill.position.set(0, 4, -8)
 scene.add(fill)
 
-// Ground (wireframe)
-const groundMat = new THREE.MeshStandardMaterial({ color: 0x223322, wireframe: true })
+// Ground — darkest base color (no wireframe)
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x000000, wireframe: false })
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(1000, 1000, 200, 200), groundMat)
 ground.rotation.x = -Math.PI / 2
 ground.position.y = 0
@@ -229,7 +231,8 @@ function makeBuilding(i, j, x, z, roadEvery, spacing) {
 texturesReady.then(() => {
   // make the city smaller by reducing grid and spacing
   const grid = 12
-  const spacing = 5
+  // increase spacing to spread out objects more
+  const spacing = 8
   // Roads every N grid lines
   const roadEvery = 4
   const roadWidth = spacing * 0.9
@@ -242,7 +245,7 @@ texturesReady.then(() => {
     new URL('./assets/broken_head.glb', import.meta.url).href
   ]
 
-  function randomPos(radius = 14) {
+  function randomPos(radius = 24) {
     const a = Math.random() * Math.PI * 2
     const r = Math.sqrt(Math.random()) * radius
     return [Math.cos(a) * r, Math.sin(a) * r]
@@ -250,7 +253,7 @@ texturesReady.then(() => {
 
   function placeObjectNoOverlap(createMeshFn) {
     for (let tries = 0; tries < 50; tries++) {
-      const [rx, rz] = randomPos(14)
+      const [rx, rz] = randomPos(24)
       const mesh = createMeshFn(rx, rz)
       const box = new THREE.Box3().setFromObject(mesh)
       box.expandByScalar(0.6)
@@ -271,6 +274,34 @@ texturesReady.then(() => {
         const clone = root.clone()
         const scale = 2.5 + Math.random() * 2.0 // much bigger
         clone.scale.setScalar(scale)
+
+        // apply holographic/metallic-glass material to all meshes in the clone
+        clone.traverse((node) => {
+          if (!node.isMesh) return
+          // use MeshPhysicalMaterial for transmission/refraction + metalness
+          const holoMat = new THREE.MeshPhysicalMaterial({
+            color: 0x88ccff,
+            metalness: 0.8,
+            roughness: 0.12,
+            transmission: 0.75,
+            thickness: 0.8,
+            ior: 1.45,
+            envMapIntensity: 1.5,
+            clearcoat: 0.25,
+            clearcoatRoughness: 0.05,
+            emissive: 0x66ddff,
+            emissiveIntensity: 0.35,
+            transparent: true,
+            opacity: 0.95,
+            side: THREE.DoubleSide
+          })
+          // if we already have a scene environment, attach it
+          if (scene.environment) holoMat.envMap = scene.environment
+          node.material = holoMat
+          node.castShadow = true
+          node.receiveShadow = true
+        })
+
         // place at rx,0,rz first then compute bbox to lift above ground
         clone.position.set(rx, 0, rz)
         const bbox = new THREE.Box3().setFromObject(clone)
@@ -283,6 +314,30 @@ texturesReady.then(() => {
       if (!placed) {
         // fallback: add at fixed spot, elevated to sit on ground
         root.scale.setScalar(3.0)
+        // apply holographic material to fallback root as well
+        root.traverse((node) => {
+          if (!node.isMesh) return
+          const holoMat = new THREE.MeshPhysicalMaterial({
+            color: 0x88ccff,
+            metalness: 0.8,
+            roughness: 0.12,
+            transmission: 0.75,
+            thickness: 0.8,
+            ior: 1.45,
+            envMapIntensity: 1.5,
+            clearcoat: 0.25,
+            clearcoatRoughness: 0.05,
+            emissive: 0x66ddff,
+            emissiveIntensity: 0.35,
+            transparent: true,
+            opacity: 0.95,
+            side: THREE.DoubleSide
+          })
+          if (scene.environment) holoMat.envMap = scene.environment
+          node.material = holoMat
+          node.castShadow = true
+          node.receiveShadow = true
+        })
         root.position.set(0, 0, -6)
         const bbox = new THREE.Box3().setFromObject(root)
         const minY = bbox.min.y
@@ -321,28 +376,12 @@ texturesReady.then(() => {
     placeObjectNoOverlap(createPanel)
   }
 
-  // Create road meshes (long strips) where grid lines land
-  const roadMat = new THREE.MeshStandardMaterial({ color: 0x0f0f0f, roughness: 1, metalness: 0 })
-  const length = grid * spacing + spacing
-  for (let i = 0; i < grid; i++) {
-    if (i % roadEvery !== 0) continue
-    const x = (i - grid / 2) * spacing
-    const geom = new THREE.BoxGeometry(roadWidth, 0.04, length)
-    const road = new THREE.Mesh(geom, roadMat)
-    road.position.set(x, 0.02, 0)
-    scene.add(road)
-  }
-  for (let j = 0; j < grid; j++) {
-    if (j % roadEvery !== 0) continue
-    const z = (j - grid / 2) * spacing
-    const geom = new THREE.BoxGeometry(length, 0.04, roadWidth)
-    const road = new THREE.Mesh(geom, roadMat)
-    road.position.set(0, 0.02, z)
-    scene.add(road)
-  }
+  // Roads removed: no road meshes are created for a cleaner scene
+  // (Previously created long strip meshes along grid lines.)
 
   // place camera outside the city so it spawns looking in
-  // use the scene extent (`length`) to pick a good distance
+  // compute scene extent and use it to pick a good distance
+  const length = grid * spacing + spacing
   camera.position.set(0, 1.8, Math.max(12, Math.ceil(length * 1.3)))
   camera.lookAt(0, 1.8, 0)
 
