@@ -7,6 +7,15 @@ const app = document.querySelector('#app')
 app.innerHTML = `
   <div id="scene-container"></div>
   <div id="ui">Use arrow keys or WASD to move — click to focus</div>
+  <div id="music-player" aria-label="Music player">
+    <div class="mp-controls">
+      <button id="mp-prev" title="Previous">⏮</button>
+      <button id="mp-play" title="Play">▶</button>
+      <button id="mp-next" title="Next">⏭</button>
+      <input id="mp-vol" type="range" min="0" max="1" step="0.01" value="0.6" aria-label="Volume" />
+    </div>
+    <div id="mp-tracklist" class="mp-tracklist"></div>
+  </div>
 `
 
 const container = document.getElementById('scene-container')
@@ -146,6 +155,80 @@ const ground = new THREE.Mesh(new THREE.PlaneGeometry(1000, 1000, 200, 200), gro
 ground.rotation.x = -Math.PI / 2
 ground.position.y = 0
 scene.add(ground)
+
+// --- Firefly particle system (soft glowing points that wander) ---
+const FIREFLY_COUNT = 300
+const fireflyPositions = new Float32Array(FIREFLY_COUNT * 3)
+const fireflyScales = new Float32Array(FIREFLY_COUNT)
+const fireflyPhases = new Float32Array(FIREFLY_COUNT)
+const fireflyVelocities = []
+const fireflyColor = new THREE.Color(0xfff2b0)
+
+const FIREFLY_AREA_RADIUS = 48
+for (let i = 0; i < FIREFLY_COUNT; i++) {
+  const r = Math.sqrt(Math.random()) * FIREFLY_AREA_RADIUS
+  const a = Math.random() * Math.PI * 2
+  const x = Math.cos(a) * r
+  const z = Math.sin(a) * r
+  const y = 0.6 + Math.random() * 6.5
+  fireflyPositions[i * 3 + 0] = x
+  fireflyPositions[i * 3 + 1] = y
+  fireflyPositions[i * 3 + 2] = z
+  // smaller, subtler base sizes
+  fireflyScales[i] = 0.9 + Math.random() * 1.6
+  fireflyPhases[i] = Math.random() * Math.PI * 2
+  fireflyVelocities.push(new THREE.Vector3((Math.random() - 0.5) * 0.08, (Math.random() - 0.5) * 0.02, (Math.random() - 0.5) * 0.08))
+}
+
+const fireflyGeo = new THREE.BufferGeometry()
+fireflyGeo.setAttribute('position', new THREE.BufferAttribute(fireflyPositions, 3))
+fireflyGeo.setAttribute('aScale', new THREE.BufferAttribute(fireflyScales, 1))
+fireflyGeo.setAttribute('aPhase', new THREE.BufferAttribute(fireflyPhases, 1))
+
+const fireflyMat = new THREE.ShaderMaterial({
+  uniforms: {
+    uTime: { value: 0.0 },
+    uColor: { value: fireflyColor }
+  },
+  vertexShader: `
+    attribute float aScale;
+    attribute float aPhase;
+    varying float vPhase;
+    uniform float uTime;
+    void main() {
+      vPhase = aPhase;
+      vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+      // subtler size oscillation and reduced base multiplier
+      float tw = 1.0 + 0.45 * sin(uTime * 1.6 + aPhase);
+      // smaller on-screen sizes for subtle look
+      gl_PointSize = aScale * tw * (120.0 / -mvPosition.z);
+      gl_Position = projectionMatrix * mvPosition;
+    }
+  `,
+  fragmentShader: `
+    uniform vec3 uColor;
+    varying float vPhase;
+    uniform float uTime;
+    void main() {
+      vec2 c = gl_PointCoord - vec2(0.5);
+      float dist = length(c);
+      // slightly softer core and reduced radius
+      float alpha = smoothstep(0.55, 0.0, dist);
+      // lower flicker amplitude and slower rate for subtlety
+      float flick = 0.35 + 0.25 * sin(uTime * 2.2 + vPhase);
+      vec3 col = uColor * 0.92;
+      gl_FragColor = vec4(col, alpha * flick * 0.6);
+    }
+  `,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+  transparent: true,
+  vertexColors: false
+})
+
+const fireflyPoints = new THREE.Points(fireflyGeo, fireflyMat)
+fireflyPoints.frustumCulled = false
+scene.add(fireflyPoints)
 
 // City generation
 const city = new THREE.Group()
@@ -435,8 +518,14 @@ function tryMove(delta) {
   if (!blockedZ) { camera.position.copy(proposedZ); return }
 }
 
-function animate() {
+let _lastTime = performance.now()
+function animate(t) {
   requestAnimationFrame(animate)
+  const now = (typeof t === 'number') ? t : performance.now()
+  const dt = Math.min(0.1, (now - _lastTime) * 0.001)
+  _lastTime = now
+  // advance shader time
+  if (fireflyMat && fireflyMat.uniforms && typeof fireflyMat.uniforms.uTime !== 'undefined') fireflyMat.uniforms.uTime.value += dt
 
   // rotation with left/right or a/d
   if (keys['arrowleft'] || keys['a']) yaw += 0.03
@@ -463,7 +552,114 @@ function animate() {
   // clamp camera height
   if (camera.position.y < 1.5) camera.position.y = 1.5
 
+  // update fireflies positions (gentle wandering + bounds)
+  try {
+    const posAttr = fireflyGeo.getAttribute('position')
+    for (let i = 0; i < FIREFLY_COUNT; i++) {
+      const ix = i * 3
+      // random small acceleration
+      fireflyVelocities[i].x += (Math.random() - 0.5) * 0.02
+      fireflyVelocities[i].y += (Math.random() - 0.5) * 0.01
+      fireflyVelocities[i].z += (Math.random() - 0.5) * 0.02
+      // clamp velocities
+      fireflyVelocities[i].x = THREE.MathUtils.clamp(fireflyVelocities[i].x, -0.25, 0.25)
+      fireflyVelocities[i].y = THREE.MathUtils.clamp(fireflyVelocities[i].y, -0.12, 0.12)
+      fireflyVelocities[i].z = THREE.MathUtils.clamp(fireflyVelocities[i].z, -0.25, 0.25)
+      // integrate
+      posAttr.array[ix + 0] += fireflyVelocities[i].x * dt * 12.0
+      posAttr.array[ix + 1] += fireflyVelocities[i].y * dt * 12.0
+      posAttr.array[ix + 2] += fireflyVelocities[i].z * dt * 12.0
+      // vertical bounds
+      if (posAttr.array[ix + 1] < 0.4) { posAttr.array[ix + 1] = 0.4; fireflyVelocities[i].y = Math.abs(fireflyVelocities[i].y) }
+      if (posAttr.array[ix + 1] > 9.0) { posAttr.array[ix + 1] = 9.0; fireflyVelocities[i].y = -Math.abs(fireflyVelocities[i].y) }
+      // radial bounds: push back toward center
+      const x = posAttr.array[ix + 0]
+      const z = posAttr.array[ix + 2]
+      if (x * x + z * z > FIREFLY_AREA_RADIUS * FIREFLY_AREA_RADIUS) {
+        posAttr.array[ix + 0] *= 0.92
+        posAttr.array[ix + 2] *= 0.92
+        fireflyVelocities[i].x *= -0.6
+        fireflyVelocities[i].z *= -0.6
+      }
+    }
+    posAttr.needsUpdate = true
+  } catch (e) {}
+
   renderer.render(scene, camera)
 }
 
 animate()
+
+// --- Simple music player using files in ./assets/music ---
+try {
+  const musicModules = import.meta.glob('./assets/music/*.{mp3,ogg}', { eager: true })
+  const trackUrls = Object.values(musicModules).map(m => (m && m.default) || m).filter(Boolean)
+  const playerEl = document.getElementById('music-player')
+  const playBtn = document.getElementById('mp-play')
+  const prevBtn = document.getElementById('mp-prev')
+  const nextBtn = document.getElementById('mp-next')
+  const volEl = document.getElementById('mp-vol')
+  const listEl = document.getElementById('mp-tracklist')
+
+  if (playerEl && trackUrls.length) {
+    const audio = new Audio()
+    audio.preload = 'auto'
+    audio.volume = parseFloat(volEl.value || '0.6')
+    let current = 0
+    let playing = false
+
+    function niceName(url) {
+      try {
+        const s = url.split('/').pop() || url
+        return s.replace(/\.(mp3|ogg)$/i, '').replace(/[-_]/g, ' ')
+      } catch (e) { return url }
+    }
+
+    function renderList() {
+      listEl.innerHTML = ''
+      trackUrls.forEach((u, i) => {
+        const d = document.createElement('div')
+        d.className = 'mp-track'
+        if (i === current) d.classList.add('active')
+        d.textContent = niceName(u)
+        d.addEventListener('click', () => { playIndex(i) })
+        listEl.appendChild(d)
+      })
+    }
+
+    function updateButtons() {
+      playBtn.textContent = playing ? '⏸' : '▶'
+    }
+
+    function playIndex(i) {
+      if (i < 0) i = trackUrls.length - 1
+      if (i >= trackUrls.length) i = 0
+      current = i
+      audio.src = trackUrls[current]
+      audio.play().catch(() => {})
+      playing = true
+      updateButtons()
+      renderList()
+    }
+
+    playBtn.addEventListener('click', () => {
+      if (!audio.src) playIndex(current)
+      else if (audio.paused) { audio.play().catch(() => {}); playing = true }
+      else { audio.pause(); playing = false }
+      updateButtons()
+    })
+    prevBtn.addEventListener('click', () => { playIndex(current - 1) })
+    nextBtn.addEventListener('click', () => { playIndex(current + 1) })
+    volEl.addEventListener('input', () => { audio.volume = parseFloat(volEl.value) })
+
+    audio.addEventListener('ended', () => { playIndex(current + 1) })
+
+    renderList()
+    // try to auto-load first track so UI shows proper filename
+    if (trackUrls.length) {
+      audio.src = trackUrls[0]
+    }
+  } else if (playerEl) {
+    playerEl.style.display = 'none'
+  }
+} catch (e) { console.warn('music player init failed', e) }

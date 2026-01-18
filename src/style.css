@@ -113,3 +113,39 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+/* Music player */
+#music-player {
+  position: fixed;
+  right: 12px;
+  top: 12px;
+  background: rgba(0,0,0,0.45);
+  color: #fff;
+  padding: 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  z-index: 60;
+  max-width: 260px;
+  pointer-events: auto;
+}
+#music-player .mp-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+#music-player button {
+  padding: 6px 8px;
+}
+#mp-tracklist {
+  margin-top: 8px;
+  max-height: 140px;
+  overflow: auto;
+}
+.mp-track {
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #e6e6ff;
+}
+.mp-track:hover { background: rgba(255,255,255,0.03); }
+.mp-track.active { background: rgba(100,108,255,0.12); }
