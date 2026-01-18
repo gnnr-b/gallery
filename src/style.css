@@ -1,5 +1,7 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap');
+
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   line-height: 1.5;
   font-weight: 400;
 
@@ -156,10 +158,8 @@ button:focus-visible {
   left: 0;
   top: 0;
   transform: translate(-50%, -100%);
-  background: rgba(0,0,0,0.45);
-  color: rgba(255,255,255,0.92);
   padding: 8px 12px;
-  border-radius: 8px;
+  font-family: Inter, system-ui, sans-serif;
   font-size: 13px;
   max-width: 360px;
   pointer-events: none;
@@ -167,5 +167,7 @@ button:focus-visible {
   transition: opacity 260ms ease, transform 260ms ease;
   opacity: 0;
   text-align: center;
+  background: rgba(0,0,0,0.45);
+  color: rgba(255,255,255,0.92);
   backdrop-filter: blur(4px) saturate(0.9);
 }

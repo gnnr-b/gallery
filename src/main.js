@@ -27,6 +27,7 @@ haikuEl.id = 'haiku-overlay'
 haikuEl.textContent = ''
 haikuEl.style.opacity = '0'
 haikuEl.style.pointerEvents = 'none'
+haikuEl.style.whiteSpace = 'pre-wrap'
 app.appendChild(haikuEl)
 
 const scene = new THREE.Scene()
