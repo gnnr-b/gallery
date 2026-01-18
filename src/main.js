@@ -7,7 +7,7 @@ import haikuData from './data/data.json'
 const app = document.querySelector('#app')
 app.innerHTML = `
   <div id="scene-container"></div>
-  <div id="ui">Use arrow keys or WASD to move</div>
+  <div id="ui">Use arrow keys to move</div>
   <div id="music-player" aria-label="Music player">
     <div class="mp-controls">
       <button id="mp-prev" title="Previous">⏮</button>
