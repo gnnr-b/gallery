@@ -46,16 +46,16 @@ new HDRLoader()
 // Load image textures and video texture
 const texLoader = new THREE.TextureLoader()
 const imagePaths = [
-  new URL('./assets/0001.png', import.meta.url).href,
-  new URL('./assets/0003.png', import.meta.url).href,
-  new URL('./assets/0004.png', import.meta.url).href,
-  new URL('./assets/0005.png', import.meta.url).href,
-  new URL('./assets/0006.png', import.meta.url).href,
-  new URL('./assets/0007.png', import.meta.url).href,
-  new URL('./assets/0008.png', import.meta.url).href,
-  new URL('./assets/0009.png', import.meta.url).href,
-  new URL('./assets/0010.png', import.meta.url).href,
-  new URL('./assets/0011.png', import.meta.url).href
+  new URL('./assets/img/0001.png', import.meta.url).href,
+  new URL('./assets/img/0002.png', import.meta.url).href,
+  new URL('./assets/img/0003.png', import.meta.url).href,
+  new URL('./assets/img/0004.png', import.meta.url).href,
+  new URL('./assets/img/0005.png', import.meta.url).href,
+  new URL('./assets/img/0006.png', import.meta.url).href,
+  new URL('./assets/img/0007.png', import.meta.url).href,
+  new URL('./assets/img/0008.png', import.meta.url).href,
+  new URL('./assets/img/0009.png', import.meta.url).href,
+  new URL('./assets/img/0010.png', import.meta.url).href
 ]
 let imageTextures = []
 
@@ -114,7 +114,7 @@ function makeTextureForFace(srcTex, faceW, faceH) {
 // create video element and texture (muted so browsers allow autoplay when clicked)
 let videoTexture = null
 const videoEl = document.createElement('video')
-videoEl.src = new URL('./assets/0002.mp4', import.meta.url).href
+videoEl.src = new URL('./assets/video/0001.mp4', import.meta.url).href
 videoEl.loop = true
 videoEl.muted = true
 videoEl.playsInline = true
@@ -241,8 +241,11 @@ texturesReady.then(() => {
   // Load .glb models and place them in randomized, non-overlapping spots
   const gltfLoader = new GLTFLoader()
   const modelFiles = [
-    new URL('./assets/ganesha.glb', import.meta.url).href,
-    new URL('./assets/broken_head.glb', import.meta.url).href
+    new URL('./assets/models/chains.glb', import.meta.url).href,
+    new URL('./assets/models/ghost.glb', import.meta.url).href,
+    new URL('./assets/models/hooded.glb', import.meta.url).href,
+    new URL('./assets/models/lantern.glb', import.meta.url).href,
+    new URL('./assets/models/maiden.glb', import.meta.url).href
   ]
 
   function randomPos(radius = 24) {
@@ -265,85 +268,153 @@ texturesReady.then(() => {
   }
 
   // place models larger and in their own spaces
-  modelFiles.forEach((p) => {
+  // holographic material factory (reuse for fallbacks)
+  function makeHoloMaterial() {
+    return new THREE.MeshPhysicalMaterial({
+      color: 0x88ccff,
+      metalness: 0.8,
+      roughness: 0.12,
+      transmission: 0.75,
+      thickness: 0.8,
+      ior: 1.45,
+      envMapIntensity: 1.5,
+      clearcoat: 0.25,
+      clearcoatRoughness: 0.05,
+      emissive: 0x66ddff,
+      emissiveIntensity: 0.35,
+      transparent: true,
+      opacity: 0.95,
+      side: THREE.DoubleSide
+    })
+  }
+
+  modelFiles.forEach((p, idx) => {
     gltfLoader.load(p, (g) => {
+      console.log('model loaded:', p)
       const root = g.scene || g.scenes[0]
       root.traverse(n => { if (n.isMesh) { n.castShadow = true; n.receiveShadow = true } })
       // create mesh wrapper function for placement
       const createFn = (rx, rz) => {
         const clone = root.clone()
-        const scale = 2.5 + Math.random() * 2.0 // much bigger
-        clone.scale.setScalar(scale)
+        // apply an initial random scale then normalize to a reasonable size
+        const randScale = 1.5 + Math.random() * 2.5
+        clone.scale.setScalar(randScale)
 
         // apply holographic/metallic-glass material to all meshes in the clone
         clone.traverse((node) => {
           if (!node.isMesh) return
-          // use MeshPhysicalMaterial for transmission/refraction + metalness
-          const holoMat = new THREE.MeshPhysicalMaterial({
-            color: 0x88ccff,
-            metalness: 0.8,
-            roughness: 0.12,
-            transmission: 0.75,
-            thickness: 0.8,
-            ior: 1.45,
-            envMapIntensity: 1.5,
-            clearcoat: 0.25,
-            clearcoatRoughness: 0.05,
-            emissive: 0x66ddff,
-            emissiveIntensity: 0.35,
-            transparent: true,
-            opacity: 0.95,
-            side: THREE.DoubleSide
-          })
-          // if we already have a scene environment, attach it
+          const holoMat = makeHoloMaterial()
           if (scene.environment) holoMat.envMap = scene.environment
+          // make the holographic material more aggressively visible for reliability
+          holoMat.side = THREE.DoubleSide
+          holoMat.transparent = false
+          holoMat.opacity = 1.0
+          holoMat.emissiveIntensity = 0.8
           node.material = holoMat
           node.castShadow = true
           node.receiveShadow = true
+          node.visible = true
+          node.frustumCulled = false
+          node.renderOrder = 1
+          // ensure normals exist for proper lighting
+          try { if (node.geometry && !node.geometry.attributes.normal) node.geometry.computeVertexNormals() } catch (e) {}
         })
 
         // place at rx,0,rz first then compute bbox to lift above ground
         clone.position.set(rx, 0, rz)
         const bbox = new THREE.Box3().setFromObject(clone)
-        const minY = bbox.min.y
+        const size = new THREE.Vector3()
+        bbox.getSize(size)
+        // normalize scale so largest dimension is near target (3-6 units)
+        const maxDim = Math.max(size.x, size.y, size.z, 0.0001)
+        const target = 3.5
+        const normScale = target / maxDim
+        // clamp overall resulting scale to avoid extreme sizes
+        const finalScale = THREE.MathUtils.clamp(normScale * randScale, 0.5, 6.0)
+        clone.scale.setScalar(finalScale)
+
+        // recompute bbox after scaling and lift to rest on ground
+        const bbox2 = new THREE.Box3().setFromObject(clone)
+        const minY = bbox2.min.y
         const lift = (minY < 0) ? -minY + 0.05 : 0.05
         clone.position.y = lift
+
+        // add a small axes helper to the model root for visibility
+        try {
+          const axes = new THREE.AxesHelper(Math.max(size.x, size.y, size.z) * 1.5 || 1.5)
+          clone.add(axes)
+        } catch (e) {}
+
         return clone
       }
       const placed = placeObjectNoOverlap(createFn)
-      if (!placed) {
-        // fallback: add at fixed spot, elevated to sit on ground
-        root.scale.setScalar(3.0)
-        // apply holographic material to fallback root as well
-        root.traverse((node) => {
-          if (!node.isMesh) return
-          const holoMat = new THREE.MeshPhysicalMaterial({
-            color: 0x88ccff,
-            metalness: 0.8,
-            roughness: 0.12,
-            transmission: 0.75,
-            thickness: 0.8,
-            ior: 1.45,
-            envMapIntensity: 1.5,
-            clearcoat: 0.25,
-            clearcoatRoughness: 0.05,
-            emissive: 0x66ddff,
-            emissiveIntensity: 0.35,
-            transparent: true,
-            opacity: 0.95,
-            side: THREE.DoubleSide
+      if (placed) {
+        // add a visible marker at the placed model to help locate it
+        try {
+          const markerMat = new THREE.MeshStandardMaterial({ color: 0x00ffcc, emissive: 0x00aaff, emissiveIntensity: 0.9 })
+          const marker = new THREE.Mesh(new THREE.SphereGeometry(0.35, 10, 10), markerMat)
+          marker.position.copy(placed.position)
+          city.add(marker)
+          console.log('model placed at', placed.position.x.toFixed(1), placed.position.z.toFixed(1))
+        } catch (e) {}
+      } else {
+        // fallback: clone the loaded root, force-visible materials, normalize scale,
+        // and place directly in front of the camera so it's always visible for debugging.
+        try {
+          // compute distributed fallback position around a ring so models are spread out
+          const angle = (idx / modelFiles.length) * Math.PI * 2 + (Math.random() - 0.5) * 0.4
+          const radius = 8 + Math.random() * 18
+          const rx = Math.cos(angle) * radius
+          const rz = Math.sin(angle) * radius
+
+          const clone = root.clone()
+          // apply holographic material to fallback clone as well
+          clone.traverse((node) => {
+            if (!node.isMesh) return
+            const holoMat = makeHoloMaterial()
+            if (scene.environment) holoMat.envMap = scene.environment
+            holoMat.side = THREE.DoubleSide
+            holoMat.transparent = false
+            holoMat.opacity = 1.0
+            holoMat.emissiveIntensity = 0.9
+            node.material = holoMat
+            node.castShadow = true
+            node.receiveShadow = true
+            node.visible = true
+            node.frustumCulled = false
+            node.renderOrder = 1
+            try { if (node.geometry && !node.geometry.attributes.normal) node.geometry.computeVertexNormals() } catch (e) {}
           })
-          if (scene.environment) holoMat.envMap = scene.environment
-          node.material = holoMat
-          node.castShadow = true
-          node.receiveShadow = true
-        })
-        root.position.set(0, 0, -6)
-        const bbox = new THREE.Box3().setFromObject(root)
-        const minY = bbox.min.y
-        const lift = (minY < 0) ? -minY + 0.05 : 0.05
-        root.position.y = lift
-        scene.add(root)
+
+          // apply a reasonable scale relative to its bbox
+          const tmpBox = new THREE.Box3().setFromObject(clone)
+          const tmpSize = new THREE.Vector3()
+          tmpBox.getSize(tmpSize)
+          const maxDim = Math.max(tmpSize.x, tmpSize.y, tmpSize.z, 0.0001)
+          const target = 3.5
+          const norm = THREE.MathUtils.clamp(target / maxDim, 0.4, 5.0)
+          clone.scale.setScalar(norm)
+
+          // set position and lift to rest on ground
+          clone.position.set(rx, 0, rz)
+          const bbox2 = new THREE.Box3().setFromObject(clone)
+          const minY = bbox2.min.y
+          const lift = (minY < 0) ? -minY + 0.05 : 0.05
+          clone.position.y = lift
+
+          city.add(clone)
+          // register its bbox so future placement avoids overlap
+          const placedBox = new THREE.Box3().setFromObject(clone)
+          placedBox.expandByScalar(0.6)
+          buildingBoxes.push(placedBox)
+          console.warn('distributed fallback placed for', p, 'at', rx.toFixed(1), rz.toFixed(1))
+
+          // add helpers for visibility
+          city.add(new THREE.Box3Helper(placedBox, 0xff00ff))
+          clone.add(new THREE.AxesHelper(Math.max(tmpSize.x, tmpSize.y, tmpSize.z) * 0.6 || 1))
+        } catch (e) {
+          console.error('fallback placement failed for', p, e)
+        }
       }
     }, undefined, (err) => console.warn('model load failed', p, err))
   })

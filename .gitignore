@@ -25,3 +25,9 @@ dist-ssr
 
 # Models
 .glb
+
+# Music
+*.mp3
+
+# Images
+*.png
