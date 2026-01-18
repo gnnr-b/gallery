@@ -35,6 +35,9 @@ const scene = new THREE.Scene()
 scene.fog = new THREE.FogExp2(0x000000, 0.006)
 
 const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000)
+// use YXZ rotation order (yaw, then pitch) so applying yaw doesn't produce
+// unexpected axis-swapped rotations when pitch is non-zero (from lookAt)
+camera.rotation.order = 'YXZ'
 camera.position.set(0, 1.8, 6)
 
 const renderer = new THREE.WebGLRenderer({ antialias: true })
@@ -494,9 +497,47 @@ texturesReady.then(() => {
   // place camera outside the city so it spawns looking in
   // compute scene extent and use it to pick a good distance
   const length = grid * spacing + spacing
-  // place camera a bit closer: use a smaller multiplier and lower minimum
-  camera.position.set(0, 1.8, Math.max(6, Math.ceil(length * 0.8)))
+  // attempt to spawn camera inside the city: sample random positions
+  // and pick the first one that doesn't intersect any building boxes
+  function findSpawnInside(maxRadius = Math.max(8, length * 0.35), tries = 300) {
+    for (let i = 0; i < tries; i++) {
+      const a = Math.random() * Math.PI * 2
+      // bias samples toward the center for earlier success
+      const bias = (i < tries * 0.5) ? 0.5 : 1.0
+      const r = Math.random() * maxRadius * bias
+      const x = Math.cos(a) * r
+      const z = Math.sin(a) * r
+      const pos = new THREE.Vector3(x, 1.8, z)
+      const sphere = new THREE.Sphere(pos, playerRadius)
+      let blocked = false
+      for (const box of buildingBoxes) {
+        if (sphere.intersectsBox(box)) { blocked = true; break }
+      }
+      if (!blocked) return pos
+    }
+    return null
+  }
+
+  const spawnPos = findSpawnInside()
+  if (spawnPos) {
+    camera.position.copy(spawnPos)
+  } else {
+    // fallback: place camera a little closer to the city on spawn
+    camera.position.set(0, 1.8, Math.max(2, Math.ceil(length * 0.45)))
+  }
   camera.lookAt(0, 1.8, 0)
+  // initialize `yaw` from the camera's forward direction so controls
+  // remain aligned with the facing direction after spawning
+  try {
+    const initForward = new THREE.Vector3()
+    camera.getWorldDirection(initForward)
+    initForward.y = 0
+    initForward.normalize()
+    // Three.js forward for rotation `y = 0` is (0,0,-1).
+    // For a given forward vector `f`, the correct yaw satisfies
+    // f = (-sin(yaw), 0, -cos(yaw)), so yaw = atan2(-f.x, -f.z).
+    yaw = Math.atan2(-initForward.x, -initForward.z)
+  } catch (e) {}
 
   animate()
 })
@@ -565,12 +606,13 @@ function animate(t) {
   if (keys['arrowleft'] || keys['a']) yaw += 0.03
   if (keys['arrowright'] || keys['d']) yaw -= 0.03
 
-  // compute direction vectors
-  camera.rotation.y = yaw
-  camera.getWorldDirection(forward)
-  forward.y = 0
-  forward.normalize()
-  right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize()
+  // apply yaw while preserving pitch using the camera's rotation order
+  // this avoids gimbal/sign issues when camera pitch was set by lookAt
+  camera.rotation.set(camera.rotation.x, yaw, 0)
+  // forward = (-sin(yaw), 0, -cos(yaw)) matches Three.js where yaw=0 -> forward (0,0,-1)
+  forward.set(-Math.sin(yaw), 0, -Math.cos(yaw))
+  // right = (cos(yaw), 0, -sin(yaw)) is the camera's local +X direction
+  right.set(Math.cos(yaw), 0, -Math.sin(yaw))
 
   // movement with collision
   const moveDelta = new THREE.Vector3()
