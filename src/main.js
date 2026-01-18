@@ -40,6 +40,17 @@ const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerH
 camera.rotation.order = 'YXZ'
 camera.position.set(0, 1.8, 6)
 
+// Wrapping: when the camera drifts far from scene objects, wrap X/Z.
+// `wrapLimit` is tuned after the city is generated; default keeps wrapping
+// behavior even if generation hasn't finished yet.
+let wrapLimit = 60
+function wrapCoordinate(coord, limit) {
+  const span = limit * 2
+  let r = coord + limit
+  r = ((r % span) + span) % span
+  return r - limit
+}
+
 const renderer = new THREE.WebGLRenderer({ antialias: true })
 renderer.setPixelRatio(window.devicePixelRatio)
 renderer.setSize(window.innerWidth, window.innerHeight)
@@ -497,6 +508,8 @@ texturesReady.then(() => {
   // place camera outside the city so it spawns looking in
   // compute scene extent and use it to pick a good distance
   const length = grid * spacing + spacing
+  // tune wrap limit from scene extent so wrapping happens at sensible distance
+  wrapLimit = Math.max(48, Math.ceil(length * 0.55))
   // attempt to spawn camera inside the city: sample random positions
   // and pick the first one that doesn't intersect any building boxes
   function findSpawnInside(maxRadius = Math.max(8, length * 0.35), tries = 300) {
@@ -627,6 +640,25 @@ function animate(t) {
 
   // clamp camera height
   if (camera.position.y < 1.5) camera.position.y = 1.5
+
+  // Wrap camera position if it drifts far away from scene objects
+  try {
+    if (buildingBoxes && buildingBoxes.length) {
+      const cam2 = new THREE.Vector2(camera.position.x, camera.position.z)
+      let nearest = Infinity
+      const ctmp = new THREE.Vector3()
+      for (const b of buildingBoxes) {
+        b.getCenter(ctmp)
+        const d = cam2.distanceTo(new THREE.Vector2(ctmp.x, ctmp.z))
+        if (d < nearest) nearest = d
+      }
+      // only wrap when the nearest object is farther than the threshold
+      if (nearest > wrapLimit * 0.9) {
+        camera.position.x = wrapCoordinate(camera.position.x, wrapLimit)
+        camera.position.z = wrapCoordinate(camera.position.z, wrapLimit)
+      }
+    }
+  } catch (e) {}
 
   // Haiku overlay detection: find the nearest interactive object within view and distance
   try {
