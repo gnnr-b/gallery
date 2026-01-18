@@ -1,0 +1,47 @@
+{
+  "0001.png": {
+    "haiku": "Empty hallway hums\nLights flicker without a name\nSteps wait to be heard"
+  },
+  "0002.png": {
+    "haiku": "Door left half open\nNeither welcome nor refusal\nAir holds its breath still"
+  },
+  "0003.png": {
+    "haiku": "Last bus idles here\nDestination scraped away\nNight reads the schedule"
+  },
+  "0004.png": {
+    "haiku": "Carpet smells of time\nPatterns worn by passing lives\nNo one stays long now"
+  },
+  "0005.png": {
+    "haiku": "Stairwell without end\nEchoes choose no direction\nUp forgets down here"
+  },
+  "0006.png": {
+    "haiku": "Office after dark\nScreens glow with unfinished work\nChairs face no one home"
+  },
+  "0007.png": {
+    "haiku": "Swimming pool at dusk\nWater waits without a sound\nRules lose their meaning"
+  },
+  "0008.png": {
+    "haiku": "Mall before sunrise\nLocked gates dream of voices lost\nMusic hums alone"
+  },
+  "0009.png": {
+    "haiku": "Hospital corridor\nShoes whisper what words cannot\nTime moves on soft wheels"
+  },
+  "0010.png": {
+    "haiku": "Fogged glass entryway\nInside and outside dissolve\nHere is not yet there"
+  },
+  "scene01.glb": {
+    "haiku": "Unloaded platform\nTracks stretch past the final sign\nArrival pauses"
+  },
+  "scene02.glb": {
+    "haiku": "Ceiling lights blink once\nPower waits for someone else\nRoom holds its shape still"
+  },
+  "scene03.glb": {
+    "haiku": "Empty lobby clock\nMinute hand refuses time\nNow repeats itself"
+  },
+  "scene04.glb": {
+    "haiku": "Parking lot at dawn\nLines promise order and rest\nNothing chooses yet"
+  },
+  "scene05.glb": {
+    "haiku": "Bare room, white and quiet\nCorners watch the open door\nPurpose not assigned"
+  }
+}

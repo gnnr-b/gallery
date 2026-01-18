@@ -2,6 +2,7 @@ import './style.css'
 import * as THREE from 'three'
 import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import haikuData from './data/data.json'
 
 const app = document.querySelector('#app')
 app.innerHTML = `
@@ -19,6 +20,14 @@ app.innerHTML = `
 `
 
 const container = document.getElementById('scene-container')
+
+// overlay element for haiku text
+const haikuEl = document.createElement('div')
+haikuEl.id = 'haiku-overlay'
+haikuEl.textContent = ''
+haikuEl.style.opacity = '0'
+haikuEl.style.pointerEvents = 'none'
+app.appendChild(haikuEl)
 
 const scene = new THREE.Scene()
 // darker ambient fog to push mid/long-range values toward black
@@ -233,7 +242,19 @@ scene.add(fireflyPoints)
 // City generation
 const city = new THREE.Group()
 scene.add(city)
+// interactive objects that can display haiku when looked at closely
+const interactiveObjects = []
 
+function findHaikuForSrc(src) {
+  if (!src) return null
+  try {
+    for (const k of Object.keys(haikuData)) {
+      if (!k) continue
+      if (typeof src === 'string' && src.indexOf(k) !== -1) return haikuData[k].haiku
+    }
+  } catch (e) {}
+  return null
+}
 // For collision checks
 const buildingBoxes = []
 const playerRadius = 0.45
@@ -272,6 +293,7 @@ function makeBuilding(i, j, x, z, roadEvery, spacing) {
 
   // Create simple cube materials: images on four sides (+X, -X, +Z, -Z), dark top/bottom
   const materials = []
+  const faceFilenames = []
   for (let fi = 0; fi < 6; fi++) {
     // face indices: 0:+X, 1:-X, 2:+Y(top), 3:-Y(bottom), 4:+Z, 5:-Z
     if (fi === 2 || fi === 3) {
@@ -293,12 +315,16 @@ function makeBuilding(i, j, x, z, roadEvery, spacing) {
     const faceH = h
     const tex = makeTextureForFace(src, faceW, faceH)
     materials.push(new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, side: THREE.FrontSide }))
+    try { if (src && src.image && src.image.src) faceFilenames.push(src.image.src) } catch (e) {}
   }
 
   const mesh = new THREE.Mesh(geom, materials)
   mesh.position.set(bx, h / 2, bz)
   mesh.castShadow = false
   mesh.receiveShadow = false
+  // store a representative image URL for haiku lookup and register
+  mesh.userData.haikuSrc = faceFilenames.length ? faceFilenames[0] : null
+  interactiveObjects.push(mesh)
   return mesh
 }
 
@@ -416,6 +442,9 @@ texturesReady.then(() => {
         const placedBox = new THREE.Box3().setFromObject(placed)
         placedBox.expandByScalar(0.6)
         buildingBoxes.push(placedBox)
+        // attach source glb URL so models can show haiku (if available)
+        try { placed.userData.haikuSrc = p } catch (e) {}
+        interactiveObjects.push(placed)
       }
     }, undefined, () => {})
   })
@@ -429,6 +458,7 @@ texturesReady.then(() => {
       const geom = new THREE.BoxGeometry(panelSize, panelSize, panelSize)
       const baseMat = new THREE.MeshStandardMaterial({ color: 0x0f0f0f, metalness: 0.9, roughness: 0.12 })
       const materials = []
+      const faceFilenames = []
       for (let fi = 0; fi < 6; fi++) materials.push(baseMat)
       if (imageTextures.length) {
         // Put images on all four vertical sides (0,1,4,5). Each side can be different.
@@ -443,12 +473,15 @@ texturesReady.then(() => {
           const faceW = panelSize
           const tex = makeTextureForFace(src, faceW, faceH)
           materials[fi] = new THREE.MeshStandardMaterial({ map: tex, metalness: 0.0, roughness: 0.35, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.6 })
+          try { if (src && src.image && src.image.src) faceFilenames.push(src.image.src) } catch (e) {}
         }
       }
       const mesh = new THREE.Mesh(geom, materials)
       mesh.position.set(rx, panelSize/2, rz)
       mesh.castShadow = false
       mesh.receiveShadow = false
+      mesh.userData.haikuSrc = faceFilenames.length ? faceFilenames[0] : null
+      interactiveObjects.push(mesh)
       return mesh
     }
     placeObjectNoOverlap(createPanel)
@@ -551,6 +584,47 @@ function animate(t) {
 
   // clamp camera height
   if (camera.position.y < 1.5) camera.position.y = 1.5
+
+  // Haiku overlay detection: find the nearest interactive object within view and distance
+  try {
+    // camera forward is 'forward' with y zeroed earlier
+    const camDir = forward.clone().normalize()
+    let bestObj = null
+    let bestDist = Infinity
+    const tmpBox = new THREE.Box3()
+    const tmpCenter = new THREE.Vector3()
+    for (const obj of interactiveObjects) {
+      if (!obj) continue
+      tmpBox.setFromObject(obj)
+      tmpBox.getCenter(tmpCenter)
+      const toObj = tmpCenter.clone().sub(camera.position)
+      const dist = toObj.length()
+      if (dist > 6.0) continue
+      const dirTo = toObj.clone().normalize()
+      const dot = camDir.dot(dirTo)
+      if (dot < 0.7) continue
+      if (dist < bestDist) { bestDist = dist; bestObj = { obj, center: tmpCenter.clone() } }
+    }
+
+    if (bestObj && bestObj.obj && bestObj.obj.userData) {
+      const src = bestObj.obj.userData.haikuSrc || ''
+      const haiku = findHaikuForSrc(src)
+      if (haiku) {
+        // project center to screen
+        const proj = bestObj.center.clone().project(camera)
+        const x = (proj.x * 0.5 + 0.5) * window.innerWidth
+        const y = (-proj.y * 0.5 + 0.5) * window.innerHeight
+        haikuEl.textContent = haiku
+        haikuEl.style.left = `${x}px`
+        haikuEl.style.top = `${y - 36}px`
+        haikuEl.style.opacity = '1'
+      } else {
+        haikuEl.style.opacity = '0'
+      }
+    } else {
+      haikuEl.style.opacity = '0'
+    }
+  } catch (e) {}
 
   // update fireflies positions (gentle wandering + bounds)
   try {

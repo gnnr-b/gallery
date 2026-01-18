@@ -149,3 +149,23 @@ button:focus-visible {
 }
 .mp-track:hover { background: rgba(255,255,255,0.03); }
 .mp-track.active { background: rgba(100,108,255,0.12); }
+
+/* Haiku overlay shown when camera looks at an object */
+#haiku-overlay {
+  position: fixed;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -100%);
+  background: rgba(0,0,0,0.45);
+  color: rgba(255,255,255,0.92);
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+  max-width: 360px;
+  pointer-events: none;
+  z-index: 80;
+  transition: opacity 260ms ease, transform 260ms ease;
+  opacity: 0;
+  text-align: center;
+  backdrop-filter: blur(4px) saturate(0.9);
+}
