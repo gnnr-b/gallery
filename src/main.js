@@ -387,20 +387,23 @@ texturesReady.then(() => {
   // place models larger and in their own spaces
   // holographic material factory (reuse for fallbacks)
   function makeHoloMaterial() {
+    // Darker metallic variant: very dark base color with strong specular
+    // reflections, low roughness and pronounced clearcoat for a crisp
+    // metallic look while staying visually dark.
     return new THREE.MeshPhysicalMaterial({
-      color: 0x88ccff,
-      metalness: 0.8,
-      roughness: 0.12,
-      transmission: 0.75,
-      thickness: 0.8,
-      ior: 1.45,
-      envMapIntensity: 1.5,
-      clearcoat: 0.25,
-      clearcoatRoughness: 0.05,
-      emissive: 0x66ddff,
-      emissiveIntensity: 0.35,
-      transparent: true,
-      opacity: 0.95,
+      color: 0x07101a,
+      metalness: 0.98,
+      roughness: 0.06,
+      transmission: 0.0,
+      thickness: 0.0,
+      ior: 1.6,
+      envMapIntensity: 1.4,
+      clearcoat: 0.85,
+      clearcoatRoughness: 0.01,
+      emissive: 0x00060a,
+      emissiveIntensity: 0.01,
+      transparent: false,
+      opacity: 1.0,
       side: THREE.DoubleSide
     })
   }
