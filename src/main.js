@@ -263,9 +263,16 @@ const interactiveObjects = []
 function findHaikuForSrc(src) {
   if (!src) return null
   try {
+    // normalize to the URL basename (e.g. "0001-DEfRsdbw.png") and
+    // compare against haiku keys by their base name (without extension)
+    const basename = (typeof src === 'string') ? String(src).split('/').pop().split('?')[0] : ''
+    const nameNoExt = basename.replace(/\.[^.]*$/, '')
     for (const k of Object.keys(haikuData)) {
       if (!k) continue
-      if (typeof src === 'string' && src.indexOf(k) !== -1) return haikuData[k].haiku
+      const keyBase = String(k).replace(/\.[^.]*$/, '')
+      if (!keyBase) continue
+      // match if the asset basename includes the key base (handles hashed names)
+      if (basename && nameNoExt.indexOf(keyBase) !== -1) return haikuData[k].haiku
     }
   } catch (e) {}
   return null
