@@ -7,7 +7,9 @@ export function startTouchControls(container, { onLook = () => {}, onMove = () =
   let lastMultiMid = null
 
   const lookSensitivity = 0.0025 // radians per pixel
-  const moveScale = 1 / 50 // pixels -> axis magnitude
+  // reduce sensitivity for two-finger drag: smaller value -> less movement per pixel
+  const moveScale = 1 / 120 // pixels -> axis magnitude
+  const moveDeadzone = 0.03 // ignore tiny drags
 
   function getMid(a, b) {
     return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }
@@ -52,9 +54,11 @@ export function startTouchControls(container, { onLook = () => {}, onMove = () =
         const mdx = mid.x - lastMultiMid.x
         const mdy = mid.y - lastMultiMid.y
         // map vertical drag to forward/back (negative mdy -> forward)
-        const forward = clamp(-mdy * moveScale, -1, 1)
-        const strafe = clamp(mdx * moveScale, -1, 1)
-        onMove({ x: strafe, z: forward })
+        let forwardVal = clamp(-mdy * moveScale, -1, 1)
+        let strafeVal = clamp(mdx * moveScale, -1, 1)
+        if (Math.abs(forwardVal) < moveDeadzone) forwardVal = 0
+        if (Math.abs(strafeVal) < moveDeadzone) strafeVal = 0
+        onMove({ x: strafeVal, z: forwardVal })
       }
       lastMultiMid = mid
       e.preventDefault()
