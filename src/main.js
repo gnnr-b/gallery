@@ -143,6 +143,7 @@ let videoTexture = null
 const videoEl = document.createElement('video')
 videoEl.src = new URL('./assets/video/0001.mp4', import.meta.url).href
 videoEl.loop = true
+videoEl.autoplay = true
 videoEl.muted = true
 videoEl.playsInline = true
 videoEl.preload = 'auto'
@@ -152,6 +153,8 @@ videoTexture.encoding = THREE.sRGBEncoding
 videoTexture.minFilter = THREE.LinearFilter
 videoTexture.magFilter = THREE.LinearFilter
 videoTexture.format = THREE.RGBAFormat
+// Attempt to start playback immediately; browsers allow muted autoplay in most cases.
+videoEl.play().catch(() => {})
 
 // Lights (further reduced intensities for an even darker scene)
 const hemi = new THREE.HemisphereLight(0xffffbb, 0x080820, 0.18)
