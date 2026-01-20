@@ -4,6 +4,56 @@ import { HDRLoader } from 'three/examples/jsm/loaders/HDRLoader.js'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import haikuData from './data/data.json'
 
+// --- Loading manager + small rotating-cube loader UI ---
+const loadingManager = new THREE.LoadingManager()
+const loaderOverlayEl = typeof document !== 'undefined' ? document.getElementById('loader-overlay') : null
+const loaderText = typeof document !== 'undefined' ? document.getElementById('loader-text') : null
+const loaderProgressEl = typeof document !== 'undefined' ? document.getElementById('loader-progress') : null
+const loaderCanvas = typeof document !== 'undefined' ? document.getElementById('loader-canvas') : null
+
+if (loaderCanvas) {
+  const loaderRenderer = new THREE.WebGLRenderer({ canvas: loaderCanvas, alpha: true, antialias: true })
+  loaderRenderer.setPixelRatio(window.devicePixelRatio || 1)
+  loaderRenderer.setSize(loaderCanvas.width || 160, loaderCanvas.height || 160, false)
+  const loaderScene = new THREE.Scene()
+  const loaderCamera = new THREE.PerspectiveCamera(45, 1, 0.1, 10)
+  loaderCamera.position.set(0, 0, 3)
+  // wireframe cube for loader
+  const cubeGeom = new THREE.BoxGeometry(1, 1, 1)
+  const cubeMat = new THREE.MeshBasicMaterial({ color: 0x8a7bff, wireframe: true })
+  const cube = new THREE.Mesh(cubeGeom, cubeMat)
+  loaderScene.add(cube)
+  const l = new THREE.DirectionalLight(0xffffff, 0.9)
+  l.position.set(2, 3, 2)
+  loaderScene.add(l)
+  let _loaderAnim = null
+  const _animateLoader = () => {
+    cube.rotation.x += 0.02
+    cube.rotation.y += 0.035
+    loaderRenderer.render(loaderScene, loaderCamera)
+    _loaderAnim = requestAnimationFrame(_animateLoader)
+  }
+  _animateLoader()
+
+  loadingManager.onLoad = () => {
+    if (loaderOverlayEl) loaderOverlayEl.classList.add('hidden')
+    // stop renderer loop and release GL context if possible
+    if (_loaderAnim) cancelAnimationFrame(_loaderAnim)
+    try { loaderRenderer.dispose(); if (loaderRenderer.forceContextLoss) loaderRenderer.forceContextLoss() } catch (e) {}
+    setTimeout(() => { try { if (loaderOverlayEl && loaderOverlayEl.parentNode) loaderOverlayEl.parentNode.removeChild(loaderOverlayEl) } catch (e) {} }, 700)
+  }
+
+  loadingManager.onProgress = (url, itemsLoaded, itemsTotal) => {
+    const pct = itemsTotal > 0 ? Math.round((itemsLoaded / itemsTotal) * 100) : 0
+    if (loaderProgressEl) loaderProgressEl.style.width = pct + '%'
+    if (loaderText) loaderText.textContent = `Loading ${pct}%`
+  }
+
+  loadingManager.onError = (url) => {
+    if (loaderText) loaderText.textContent = 'Load error'
+  }
+}
+
 const app = document.querySelector('#app')
 app.innerHTML = `
   <div id="scene-container"></div>
@@ -66,7 +116,7 @@ container.appendChild(renderer.domElement)
 const pmremGenerator = new THREE.PMREMGenerator(renderer)
 pmremGenerator.compileEquirectangularShader()
 const hdrPath = new URL('./assets/background.hdr', import.meta.url).href
-new HDRLoader()
+new HDRLoader(loadingManager)
   .load(hdrPath, (hdrTex) => {
     // HDRLoader provides an equirectangular texture
     const envMap = pmremGenerator.fromEquirectangular(hdrTex).texture
@@ -77,7 +127,7 @@ new HDRLoader()
   }, undefined, (err) => console.warn('HDR load failed', err))
 
 // Load image textures and video texture
-const texLoader = new THREE.TextureLoader()
+const texLoader = new THREE.TextureLoader(loadingManager)
 
 // Dynamically import all images in assets/img so adding new images is automatic.
 // Vite exposes `import.meta.glob` which returns module objects with `default` URL when eager.
@@ -366,7 +416,7 @@ texturesReady.then(() => {
 
   // --- Gallery layout ---
   // Load .glb models and place them in randomized, non-overlapping spots
-  const gltfLoader = new GLTFLoader()
+  const gltfLoader = new GLTFLoader(loadingManager)
   const modelFiles = [
     new URL('./assets/models/chains.glb', import.meta.url).href,
     new URL('./assets/models/ghost.glb', import.meta.url).href,
