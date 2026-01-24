@@ -40,7 +40,12 @@ export function startApp() {
     loadingManager.onLoad = () => {
       if (loaderOverlayEl) loaderOverlayEl.classList.add('hidden')
       if (_loaderAnim) cancelAnimationFrame(_loaderAnim)
-      try { loaderRenderer.dispose(); if (loaderRenderer.forceContextLoss) loaderRenderer.forceContextLoss() } catch (e) {}
+      try {
+        // disposing the renderer is sufficient; avoid calling forceContextLoss()
+        // because calling it when the context is already lost can trigger
+        // GL errors in some browsers/extensions.
+        loaderRenderer.dispose()
+      } catch (e) {}
       setTimeout(() => { try { if (loaderOverlayEl && loaderOverlayEl.parentNode) loaderOverlayEl.parentNode.removeChild(loaderOverlayEl) } catch (e) {} }, 700)
     }
 
@@ -222,6 +227,7 @@ export function startApp() {
   }
 
   texturesReady.then(async () => {
+    try {
     const grid = 12
     const spacing = 8
     const roadEvery = 4
@@ -255,7 +261,9 @@ export function startApp() {
     // initialize models and placement
     const { spawnPos, wrapLimit: newWrap } = await initModels({ scene, imageTextures, videoTexture, loadingManager, interactiveObjects, buildingBoxes, city })
     if (newWrap) wrapLimit = newWrap
-    if (spawnPos) camera.position.copy(spawnPos)
+    if (spawnPos) {
+      if (camera && camera.position && typeof camera.position.copy === 'function') camera.position.copy(spawnPos)
+    }
     else camera.position.set(0, 1.8, Math.max(2, Math.ceil((12 * 8 + 8) * 0.45)))
     camera.lookAt(0, 1.8, 0)
     try {
@@ -267,6 +275,7 @@ export function startApp() {
     } catch (e) {}
 
     animate()
+    } catch (err) {}
   })
 
   const controls = setupControls(camera, buildingBoxes)
